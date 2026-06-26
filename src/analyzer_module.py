@@ -1,4 +1,5 @@
 import sqlite3
+import os
 from db_module import DB_NAME
 
 def find_duplicates(target_directory, ext_filter):
@@ -35,6 +36,76 @@ def find_duplicates(target_directory, ext_filter):
         for (p,) in paths:
             print(f"  -> {p}")
     conn.close()
+
+def compare_directories(work_dir, backup_dir, ext_filter, scan_func, hash_func):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    sql_filter = f"%{ext_filter}" if ext_filter else "%"
+
+    print(f"\nСравнение с бэкапом")
+    print(f" Рабочая папка: {work_dir}")
+    print(f" Папка бэкапа: {backup_dir}")
+
+    # Считываем актуальные файлы рабочей папки из базы данных в словарь
+    cursor.execute('''
+        SELECT path, hash FROM files 
+        WHERE root_path = ? AND path LIKE ?
+    ''', [work_dir, sql_filter])
+    
+    work_files = {path: file_hash for path, file_hash in cursor.fetchall()}
+    conn.close()
+
+    # делаем обход резервной папки
+    backup_raw_files = scan_func(backup_dir, backup_dir, ext_filter)
+    
+    backup_files = {}
+    for full_path, rel_path in backup_raw_files:
+        file_hash = hash_func(full_path)
+        if file_hash:
+            backup_files[rel_path] = file_hash
+
+    # массивы для отслеживания изменений и флаг о том, что папки различны
+    is_different = False
+    only_in_work = []
+    only_in_backup = []
+    modified_files = []
+
+    # Сравниваем рабочую папку с бэкапом
+    # Ищем то, что есть в рабочей, но нет в бэкапе, или то, что изменилось
+    for rel_path, work_hash in work_files.items():
+        # если нет в бекапе то это добавленный файл
+        if rel_path not in backup_files:
+            only_in_work.append(rel_path)
+        # если не совпадает хэш то это модифицированный файл
+        elif work_hash != backup_files[rel_path]:
+            modified_files.append(rel_path)
+
+    # есть в бэкапе, но пропало в рабочей папке
+    for rel_path in backup_files:
+        if rel_path not in work_files:
+            only_in_backup.append(rel_path)
+
+    # Вывод результатов на экран
+    if only_in_work:
+        is_different = True
+        print(f"\nПоявились в рабочей папке:")
+        for p in only_in_work:
+            print(f"  -> {p}")
+
+    if only_in_backup:
+        is_different = True
+        print(f"\nУдалены из рабочей папки:")
+        for p in only_in_backup:
+            print(f"  -> {p}")
+
+    if modified_files:
+        is_different = True
+        print(f"\nИзменилось содержимое:")
+        for p in modified_files:
+            print(f"  -> {p}")
+
+    if not is_different:
+        print("\nРабочая папка идентична резервной копии.")
 
 def check_history_report(target_directory, ext_filter):
     #Отчет об изменениях
