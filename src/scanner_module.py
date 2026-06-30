@@ -110,10 +110,11 @@ def scan_directory(root_path, ext_filter=None):
                 ''', [rel_path, norm_root, current_time, current_status])
                                    
             # запись в основную таблицу
+            # !!Добавил составной ключ в ON CONFLICT
             cursor.execute('''
                 INSERT INTO files (path, root_path, size, mtime, hash, status)
                 VALUES (?, ?, ?, ?, ?, 'active')
-                ON CONFLICT(path) DO UPDATE SET
+                ON CONFLICT(root_path, path) DO UPDATE SET
                     root_path=excluded.root_path,
                     size=excluded.size,
                     mtime=excluded.mtime,
@@ -137,6 +138,3 @@ def scan_directory(root_path, ext_filter=None):
     conn.commit()
     conn.close()
     print("Сканирование и обновление индекса завершено.")
-
-    find_duplicates(norm_root, ext_filter)
-    check_history_report(norm_root, ext_filter)

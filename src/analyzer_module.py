@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from datetime import datetime
 from db_module import DB_NAME
 
 def find_duplicates(target_directory, ext_filter):
@@ -40,6 +41,7 @@ def find_duplicates(target_directory, ext_filter):
 def compare_directories(work_dir, backup_dir, ext_filter, scan_func, hash_func):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    current_time = datetime.now().isoformat()
     sql_filter = f"%{ext_filter}" if ext_filter else "%"
 
     print(f"\nСравнение с бэкапом")
@@ -53,7 +55,6 @@ def compare_directories(work_dir, backup_dir, ext_filter, scan_func, hash_func):
     ''', [work_dir, sql_filter])
     
     work_files = {path: file_hash for path, file_hash in cursor.fetchall()}
-    conn.close()
 
     # делаем обход резервной папки
     backup_raw_files = scan_func(backup_dir, backup_dir, ext_filter)
@@ -76,36 +77,60 @@ def compare_directories(work_dir, backup_dir, ext_filter, scan_func, hash_func):
         # если нет в бекапе то это добавленный файл
         if rel_path not in backup_files:
             only_in_work.append(rel_path)
+            # Добавление в историю проверок записи, что файл только в рабочей папке, а в бэкапе нет
+            cursor.execute('''
+                INSERT INTO backup_history (check_time, work_dir, backup_dir, file_path, difference_type)
+                VALUES (?, ?, ?, ?, 'only_in_work')
+            ''', [current_time, work_dir, backup_dir, rel_path])
         # если не совпадает хэш то это модифицированный файл
         elif work_hash != backup_files[rel_path]:
             modified_files.append(rel_path)
+            # Добавление в историю проверок записи, что у файла различается содержимое
+            cursor.execute('''
+                INSERT INTO backup_history (check_time, work_dir, backup_dir, file_path, difference_type)
+                VALUES (?, ?, ?, ?, 'modified')
+            ''', [current_time, work_dir, backup_dir, rel_path])
 
     # есть в бэкапе, но пропало в рабочей папке
     for rel_path in backup_files:
         if rel_path not in work_files:
             only_in_backup.append(rel_path)
+            # Добавление в историю проверок записи, что файл удален из рабочей
+            cursor.execute('''
+                INSERT INTO backup_history (check_time, work_dir, backup_dir, file_path, difference_type)
+                VALUES (?, ?, ?, ?, 'only_in_backup')
+            ''', [current_time, work_dir, backup_dir, rel_path])
+            
 
     # Вывод результатов на экран
     if only_in_work:
         is_different = True
-        print(f"\nПоявились в рабочей папке:")
+        print(f"\nОтсутствуют в бэкап папке, но есть в рабочей:")
         for p in only_in_work:
             print(f"  -> {p}")
 
     if only_in_backup:
         is_different = True
-        print(f"\nУдалены из рабочей папки:")
+        print(f"Есть в бэкап папке, но нет в рабочей:")
         for p in only_in_backup:
             print(f"  -> {p}")
 
     if modified_files:
         is_different = True
-        print(f"\nИзменилось содержимое:")
+        print(f"\nИзменено содержимое:")
         for p in modified_files:
             print(f"  -> {p}")
-
+    #Если одинаковые
     if not is_different:
         print("\nРабочая папка идентична резервной копии.")
+        # Добавление в историю проверок записи что папки идентичны
+        cursor.execute('''
+                INSERT INTO backup_history (check_time, work_dir, backup_dir, file_path, difference_type)
+                VALUES (?, ?, ?, ?, 'equal')
+            ''', [current_time, work_dir, backup_dir, None])
+        
+    conn.close()
+            
 
 def check_history_report(target_directory, ext_filter):
     #Отчет об изменениях

@@ -11,12 +11,13 @@ def init_db():
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS files (
-            path TEXT PRIMARY KEY,
+            path TEXT,
             root_path TEXT,
             size INTEGER,
             mtime TEXT,
             hash TEXT,
-            status TEXT DEFAULT 'active'
+            status TEXT DEFAULT 'active',
+            PRIMARY KEY (root_path, path)
         )
     ''')
     
@@ -31,5 +32,19 @@ def init_db():
             status TEXT DEFAULT 'created'
         )
     ''')
+
+    #!!история сравнений с бэкапом
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backup_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            check_time TEXT,
+            work_dir TEXT,
+            backup_dir TEXT,
+            file_path TEXT,
+            difference_type TEXT
+        )
+    ''')
+
     conn.commit()
     return conn
